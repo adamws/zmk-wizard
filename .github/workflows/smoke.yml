@@ -3,7 +3,11 @@ name: Smoke Test
 on:
   workflow_dispatch:
   push:
+    branches-ignore:
+      - renovate/**
   pull_request:
+    branches-ignore:
+      - renovate/**
 
 jobs:
   smoke:
