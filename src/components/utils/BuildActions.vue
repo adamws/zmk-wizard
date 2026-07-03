@@ -14,6 +14,26 @@
       </template>
     </UModal>
 
+    <!-- Preview modal -->
+    <UModal v-model:open="previewModalOpen" :title="$t('preview-modal-title')" :close="true"
+      :ui="{ content: 'max-w-4xl' }">
+      <template #body>
+        <div class="flex gap-4 h-[65vh]">
+          <div class="w-60 shrink-0 overflow-y-auto">
+            <UTree size="sm" :items="previewTreeItems" @select="(e: any, item: any) => onPreviewFileSelect(item)" />
+          </div>
+          <div class="flex-1 min-w-0 min-h-0 flex flex-col">
+            <div class="text-xs text-toned font-mono px-1 pb-1.5 truncate shrink-0"
+              :class="selectedFilePath ? 'visible' : 'invisible'">
+              {{ selectedFilePath ?? $t('preview-select-file') }}
+            </div>
+            <UTextarea readonly class="w-full h-full font-mono" size="sm" :ui="{ base: 'h-full resize-none' }"
+              :value="selectedFileContent" :placeholder="$t('preview-select-file')" />
+          </div>
+        </div>
+      </template>
+    </UModal>
+
     <UDropdownMenu v-model:open="dropdownOpen" size="lg" :items="menuItems" :content="{ align: 'end', sideOffset: 8 }"
       @update:open="onDropdownOpenChange">
       <UButton color="primary" size="xl" variant="outline" :loading="isBuilding">
@@ -124,23 +144,183 @@
 </template>
 
 <script setup lang="ts">
-import type { DropdownMenuItem, StepperItem } from '@nuxt/ui';
-import type { Keyboard } from '~/types';
+import type { DropdownMenuItem, StepperItem, TreeItem } from '@nuxt/ui';
+import { actions } from 'astro:actions';
+import { PUBLIC_TURNSTILE_SITEKEY } from 'astro:env/client';
 import { useFluent } from 'fluent-vue';
+import JSZip from 'jszip';
+import { decodeTime } from 'ulidx';
 import { computed, nextTick, ref, watch } from 'vue';
 import VueTurnstile from 'vue-turnstile';
-import { PUBLIC_TURNSTILE_SITEKEY } from 'astro:env/client';
-import { actions } from 'astro:actions';
-import JSZip from 'jszip';
-import { useKeyboardStore, useNavigationStore } from '../stores';
-import { ValidatedKeyboardSchema } from '~/lib/validators';
 import { createZMKConfig } from '~/export';
-import { decodeTime } from 'ulidx';
+import { ValidatedKeyboardSchema } from '~/lib/validators';
+import type { Keyboard } from '~/types';
+import { useKeyboardStore, useNavigationStore } from '../stores';
 
 const { $t } = useFluent();
 const toast = useToast();
 const keyboard = useKeyboardStore();
 const navigation = useNavigationStore();
+
+const previewModalOpen = ref(false);
+const selectedFilePath = ref<string | null>(null);
+
+const previewFiles = computed(() => {
+  if (!validatedData.value) return {};
+  try {
+    return createZMKConfig(validatedData.value);
+  } catch (e) {
+    console.error('Error generating preview files:', e);
+    return {};
+  }
+});
+
+const previewTreeItems = computed(() => {
+  return buildPreviewTree(previewFiles.value);
+});
+
+const selectedFileContent = computed(() => {
+  if (!selectedFilePath.value) return '';
+  return previewFiles.value[selectedFilePath.value] ?? '';
+});
+
+interface PreviewNode {
+  name: string;
+  fullPath: string;
+  icon?: string;
+}
+
+interface PreviewFileNode extends PreviewNode {
+  type: 'file';
+}
+
+interface PreviewFolderNode extends PreviewNode {
+  type: 'folder';
+  children: Record<string, PreviewFileNode | PreviewFolderNode>;
+}
+
+type PreviewEntry = PreviewFileNode | PreviewFolderNode;
+
+interface IconRule {
+  icon: string;
+  match(name: string, fullPath: string): boolean;
+}
+
+const FILE_ICON_RULES: IconRule[] = [
+  { icon: 'material-icon-theme:svg', match: (_, p) => p.endsWith('.svg') },
+  { icon: 'material-icon-theme:readme', match: (n) => n.startsWith('README') },
+  { icon: 'material-icon-theme:markdown', match: (_, p) => p.endsWith('.md') },
+  {
+    icon: 'material-icon-theme:github-actions-workflow',
+    match: (_, p) => /^\.github\/(?:workflows|actions)\/.+\.ya?ml$/.test(p),
+  },
+  { icon: 'material-icon-theme:yaml', match: (_, p) => p.endsWith('.yml') || p.endsWith('.yaml') },
+  { icon: 'material-icon-theme:json', match: (_, p) => p.endsWith('.json') },
+  { icon: 'i-lucide-file-cog', match: (n, p) => n.startsWith('Kconfig') || p.endsWith('.conf') },
+  { icon: 'i-lucide-file-braces-corner', match: (_, p) => p.endsWith('.overlay') || p.endsWith('.dtsi') || p.endsWith('.keymap') },
+];
+
+function getFileIcon(name: string, fullPath: string): string {
+  return FILE_ICON_RULES.find(r => r.match(name, fullPath))?.icon || 'i-lucide-file';
+}
+
+const FOLDER_ICON_RULES: IconRule[] = [
+  { icon: 'material-icon-theme:folder-github', match: (_, p) => p === '.github' },
+  { icon: 'material-icon-theme:folder-gh-workflows', match: (_, p) => p === '.github/workflows' },
+  { icon: 'material-icon-theme:folder-src', match: (n) => n === 'boards' },
+  { icon: 'material-icon-theme:folder-config', match: (n) => n === 'config' },
+  { icon: 'material-icon-theme:folder-meta', match: (n) => n === 'zephyr' },
+];
+
+function getFolderIcon(name: string, fullPath: string): string | undefined {
+  return FOLDER_ICON_RULES.find(r => r.match(name, fullPath))?.icon;
+}
+
+function buildPreviewTree(files: Record<string, string>): TreeItem[] {
+  const root: Record<string, PreviewEntry> = {};
+
+  for (const fullPath of Object.keys(files).sort()) {
+    const parts = fullPath.split('/');
+    let current = root;
+
+    for (let i = 0; i < parts.length; i++) {
+      const name = parts[i];
+      const isLast = i === parts.length - 1;
+      const partialPath = parts.slice(0, i + 1).join('/');
+
+      if (isLast) {
+        current[name] = { name, fullPath, type: 'file', icon: getFileIcon(name, fullPath) };
+      } else {
+        const existing = current[name];
+        if (!existing || existing.type === 'file') {
+          current[name] = {
+            name,
+            fullPath: partialPath,
+            type: 'folder',
+            icon: getFolderIcon(name, partialPath),
+            children: {},
+          };
+        }
+        current = (current[name] as PreviewFolderNode).children;
+      }
+    }
+  }
+
+  function toItems(obj: Record<string, PreviewEntry>): TreeItem[] {
+    return Object.entries(obj)
+      .sort(([, a], [, b]) => {
+        if (a.type === b.type) return 0;
+        return a.type === 'file' ? 1 : -1;
+      })
+      .map(([key, val]) => {
+        if (val.type === 'file') {
+          return { label: key, fullPath: val.fullPath, icon: val.icon } as TreeItem;
+        }
+        return {
+          label: key,
+          fullPath: val.fullPath,
+          defaultExpanded: true,
+          icon: val.icon,
+          children: toItems(val.children),
+        } as TreeItem;
+      });
+  }
+
+  function collapseSingleFolders(items: TreeItem[]): TreeItem[] {
+    return items.flatMap(item => {
+      if (!item.children) return [item];
+      const collapsed = collapseSingleFolders(item.children);
+      // merge: single child that's itself a folder (has children)
+      if (collapsed.length === 1 && collapsed[0].children) {
+        const mergedLabel = item.label + '/' + collapsed[0].label;
+        // Prefer the child's icon (more specific path) for the merged node
+        const mergedIcon = collapsed[0].icon ?? item.icon;
+        return [{
+          ...item,
+          label: mergedLabel,
+          fullPath: collapsed[0].fullPath ?? item.fullPath,
+          icon: mergedIcon,
+          children: collapsed[0].children,
+        } as TreeItem];
+      }
+      return [{ ...item, children: collapsed } as TreeItem];
+    });
+  }
+
+  return collapseSingleFolders(toItems(root));
+}
+
+function onPreviewFileSelect(item: any) {
+  // Folders have children — clicking them should not change the preview
+  if (!item || item.children || !item.fullPath) return;
+  selectedFilePath.value = item.fullPath;
+}
+
+function openPreview() {
+  dropdownOpen.value = false;
+  selectedFilePath.value = null;
+  previewModalOpen.value = true;
+}
 
 const dropdownOpen = ref(false);
 const errorModalOpen = ref(false);
@@ -196,21 +376,26 @@ function onDropdownOpenChange(open: boolean) {
 function downloadZip() {
   if (!validatedData.value) return;
   dropdownOpen.value = false;
-  const files = createZMKConfig(validatedData.value);
-  const zip = new JSZip();
-  for (const [filePath, content] of Object.entries(files)) {
-    zip.file(filePath, content);
-  }
-  zip.generateAsync({ type: 'blob' }).then((blob) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `zmk-config-${validatedData.value!.shield}.zip`;
-    a.click();
-    URL.revokeObjectURL(url);
-  });
+  try {
+    const files = createZMKConfig(validatedData.value);
+    const zip = new JSZip();
+    for (const [filePath, content] of Object.entries(files)) {
+      zip.file(filePath, content);
+    }
+    zip.generateAsync({ type: 'blob' }).then((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `zmk-config-${validatedData.value!.shield}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
 
-  selfPromoToast();
+    selfPromoToast();
+  } catch (e) {
+    console.error('Error generating ZIP:', e);
+    // toast.add();
+  }
 }
 
 function openImportSlideover() {
@@ -324,6 +509,12 @@ const menuItems = computed<DropdownMenuItem[][]>(() => [
       type: 'separator',
     },
     {
+      label: $t('build-preview'),
+      icon: 'i-lucide-eye',
+      class: 'text-toned',
+      onSelect() { openPreview(); },
+    },
+    {
       label: $t('build-download'),
       icon: 'i-lucide-download',
       class: 'text-toned',
@@ -360,6 +551,9 @@ const stepperItems = computed<StepperItem[]>(() => [
 build = Build
 build-download = Download ZIP Archive
 build-import-link = Create Import Link
+build-preview = Preview Generated Files
+preview-modal-title = Files Preview
+preview-select-file = Select a file to preview
 import-slideover-description = Get a link to a hosted git repository with your keyboard configuration
 import-generate-link = Generate Link
 
@@ -411,6 +605,9 @@ promo-action-label = Open on GitHub
 build = 生成
 build-download = 下载 ZIP 压缩包
 build-import-link = 创建导入链接
+build-preview = 预览生成的文件
+preview-modal-title = 文件预览
+preview-select-file = 选择文件进行预览
 import-slideover-description = 获取一个包含你的键盘配置的托管 git 仓库链接
 import-generate-link = 生成链接
 
@@ -462,6 +659,9 @@ promo-action-label = 在 GitHub 上打开
 build = 生成
 build-download = ZIP アーカイブをダウンロード
 build-import-link = インポートリンクを作成
+build-preview = 生成ファイルをプレビュー
+preview-modal-title = ファイルプレビュー
+preview-select-file = プレビューするファイルを選択
 import-slideover-description = キーボード設定を含むホストされた git リポジトリへのリンクを取得します。
 import-generate-link = リンクを生成
 
