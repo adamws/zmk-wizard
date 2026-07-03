@@ -507,7 +507,35 @@ export const ValidatedKeyboardSchema = KeyboardSchema.superRefine((data, ctx) =>
       }
     });
 
-    // ── 11. Pin existence on controller or device ──────────
+    // ── 11. Duplicate pin wiring ──────────────────────────
+    // Disallow two (or more) keys on the same part sharing the same
+    // combination of input and output pins — they would be the same
+    // electrical connection.
+    const wiringKeyToKeys = new Map<string, number[]>();
+    data.layout.forEach((key, idx) => {
+      if (key.part !== partIdx) return;
+      const wiring = part.keys[key.id];
+      if (!wiring) return;
+      // Use null byte as separator (cannot appear in a pin ID)
+      const combo = (wiring.input ?? "") + "\x00" + (wiring.output ?? "");
+      const list = wiringKeyToKeys.get(combo) ?? [];
+      list.push(idx);
+      wiringKeyToKeys.set(combo, list);
+    });
+    for (const [combo, indices] of wiringKeyToKeys) {
+      if (indices.length <= 1) continue;
+      const [input, output] = combo.split("\x00");
+      const pinDesc = output
+        ? `input="${input}", output="${output}"`
+        : `input="${input}" (direct kscan)`;
+      ctx.addIssue({
+        code: "custom",
+        message: `Keys ${indices.join(", ")} share the same wiring (${pinDesc}); they are electrically identical`,
+        path: ["parts", partIdx],
+      });
+    }
+
+    // ── 12. Pin existence on controller or device ──────────
     for (const pinId of Object.keys(part.pins)) {
       if (!validPinIds.has(pinId)) {
         ctx.addIssue({
@@ -518,7 +546,7 @@ export const ValidatedKeyboardSchema = KeyboardSchema.superRefine((data, ctx) =>
       }
     }
 
-    // ── 12. Bus pin capabilities — must be native ──────────
+    // ── 13. Bus pin capabilities — must be native ──────────
     const pinById = new Map(inventory.allPins.map(p => [p.id, p]));
 
     for (const [pinId, usage] of pinEntries) {
@@ -540,7 +568,7 @@ export const ValidatedKeyboardSchema = KeyboardSchema.superRefine((data, ctx) =>
         });
       }
 
-      // ── 13. Device pin capabilities — must be native ────
+      // ── 14. Device pin capabilities — must be native ────
       if (usage.usage === "device" && pinInfo.source.type !== "controller") {
         ctx.addIssue({
           code: "custom",
@@ -549,7 +577,7 @@ export const ValidatedKeyboardSchema = KeyboardSchema.superRefine((data, ctx) =>
         });
       }
 
-      // ── 14. Encoder pin capabilities — must have gpioIn + interrupt
+      // ── 15. Encoder pin capabilities — must have gpioIn + interrupt
       if (usage.usage === "encoder") {
         if (!pinInfo.capabilities.gpioIn || !pinInfo.capabilities.interrupt) {
           ctx.addIssue({

@@ -158,3 +158,160 @@ describe("ValidatedKeyboardSchema", () => {
     });
   });
 });
+
+describe("section 11 — duplicate pin wiring check", () => {
+  it("allows two keys with distinct (input, output) pairs", () => {
+    const kA = makeKey(0);
+    const kB = makeKey(0);
+    kA.row = 0; kA.col = 0;
+    kB.row = 0; kB.col = 1;
+    const data = validKeyboard({
+      layout: [kA, kB],
+      parts: [
+        {
+          name: "main",
+          controller: "nice_nano_v2",
+          pins: {
+            [pinId("d0")]: { usage: "kscan" as const, kscan: "k1", role: "input" as const },
+            [pinId("d1")]: { usage: "kscan" as const, kscan: "k1", role: "output" as const },
+            [pinId("d2")]: { usage: "kscan" as const, kscan: "k1", role: "input" as const },
+            [pinId("d3")]: { usage: "kscan" as const, kscan: "k1", role: "output" as const },
+          },
+          kscans: [{ id: "k1", kind: "matrix" as const, diodes: true }],
+          keys: {
+            [kA.id]: { input: pinId("d0"), output: pinId("d1") },
+            [kB.id]: { input: pinId("d2"), output: pinId("d3") },
+          },
+          encoders: [],
+          buses: {},
+        },
+      ],
+    });
+
+    const result = ValidatedKeyboardSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
+  it("flags two keys sharing the same input+output pin pair", () => {
+    const kA = makeKey(0);
+    const kB = makeKey(0);
+    kA.row = 0; kA.col = 0;
+    kB.row = 0; kB.col = 1;
+    const data = validKeyboard({
+      layout: [kA, kB],
+      parts: [
+        {
+          name: "main",
+          controller: "nice_nano_v2",
+          pins: {
+            [pinId("d0")]: { usage: "kscan" as const, kscan: "k1", role: "input" as const },
+            [pinId("d1")]: { usage: "kscan" as const, kscan: "k1", role: "output" as const },
+          },
+          kscans: [{ id: "k1", kind: "matrix" as const, diodes: true }],
+          keys: {
+            [kA.id]: { input: pinId("d0"), output: pinId("d1") },
+            [kB.id]: { input: pinId("d0"), output: pinId("d1") },
+          },
+          encoders: [],
+          buses: {},
+        },
+      ],
+    });
+
+    const result = ValidatedKeyboardSchema.safeParse(data);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const match = result.error.issues.find(
+        (i) =>
+          i.message.includes("share the same wiring") &&
+          i.message.includes("d0") &&
+          i.message.includes("d1") &&
+          i.message.includes("electrically identical"),
+      );
+      expect(match).toBeTruthy();
+      expect(match!.path).toEqual(["parts", 0]);
+    }
+  });
+
+  it("flags two direct-kscan keys sharing the same input pin with no output", () => {
+    const kA = makeKey(0);
+    const kB = makeKey(0);
+    kA.row = 0; kA.col = 0;
+    kB.row = 0; kB.col = 1;
+    const data = validKeyboard({
+      layout: [kA, kB],
+      parts: [
+        {
+          name: "main",
+          controller: "nice_nano_v2",
+          pins: {
+            [pinId("d0")]: { usage: "kscan" as const, kscan: "k1", role: "input" as const },
+          },
+          kscans: [{ id: "k1", kind: "direct" as const, mode: "gnd" as const }],
+          keys: {
+            [kA.id]: { input: pinId("d0") },
+            [kB.id]: { input: pinId("d0") },
+          },
+          encoders: [],
+          buses: {},
+        },
+      ],
+    });
+
+    const result = ValidatedKeyboardSchema.safeParse(data);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const match = result.error.issues.find(
+        (i) =>
+          i.message.includes("share the same wiring") &&
+          i.message.includes("d0") &&
+          i.message.includes("direct kscan"),
+      );
+      expect(match).toBeTruthy();
+      expect(match!.path).toEqual(["parts", 0]);
+    }
+  });
+
+  it("does not flag keys on different parts with same wiring", () => {
+    const kA = makeKey(0);
+    const kB = makeKey(1);
+    kA.row = 0; kA.col = 0;
+    kB.row = 1; kB.col = 0;
+    const data = validKeyboard({
+      layout: [kA, kB],
+      parts: [
+        {
+          name: "left",
+          controller: "nice_nano_v2",
+          pins: {
+            [pinId("d0")]: { usage: "kscan" as const, kscan: "k1", role: "input" as const },
+            [pinId("d1")]: { usage: "kscan" as const, kscan: "k1", role: "output" as const },
+          },
+          kscans: [{ id: "k1", kind: "matrix" as const, diodes: true }],
+          keys: {
+            [kA.id]: { input: pinId("d0"), output: pinId("d1") },
+          },
+          encoders: [],
+          buses: {},
+        },
+        {
+          name: "right",
+          controller: "nice_nano_v2",
+          pins: {
+            [pinId("d0")]: { usage: "kscan" as const, kscan: "k1", role: "input" as const },
+            [pinId("d1")]: { usage: "kscan" as const, kscan: "k1", role: "output" as const },
+          },
+          kscans: [{ id: "k1", kind: "matrix" as const, diodes: true }],
+          keys: {
+            [kB.id]: { input: pinId("d0"), output: pinId("d1") },
+          },
+          encoders: [],
+          buses: {},
+        },
+      ],
+    });
+
+    const result = ValidatedKeyboardSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+});
