@@ -234,6 +234,15 @@ function doImport() {
   }
 
   keyboard.$patch({ layout: parsed });
+
+  toast.add({
+    title: $t('imported-toast-title'),
+    type: 'foreground',
+    color: 'warning',
+    description: $t('imported-toast-desc'),
+    duration: 30 * 1000,
+  })
+
   importOpen.value = false;
 }
 
@@ -426,6 +435,9 @@ tools-export-copy = Copy
 tools-export-copied = Copied!
 tools-external-kicad = KiCAD PCB -> Layout JSON
 tools-external-kle-ng = Keyboard Layout Editor NG
+
+imported-toast-title = Adjust Keymap Layout
+imported-toast-desc = IMPORTANT: Sort keys by adjusting the keymap layout, it'll affect how the keys are ordered in the keymap.
 </ftl>
 
 <ftl locale="zh-CN">
@@ -491,6 +503,8 @@ tools-export-copied = 已复制！
 tools-external-kicad = KiCAD PCB -> 布局 JSON
 tools-external-kle-ng = Keyboard Layout Editor NG
 
+imported-toast-title = 调整键位布局
+imported-toast-desc = 重要提示：通过调整键位布局来对按键排序，键位布局控制按键在 keymap 中的顺序。
 </ftl>
 
 <ftl locale="ja">
@@ -556,4 +570,6 @@ tools-export-copied = コピーしました！
 tools-external-kicad = KiCAD PCB -> レイアウト JSON
 tools-external-kle-ng = Keyboard Layout Editor NG
 
+imported-toast-title = キーマップレイアウトの調整
+imported-toast-desc = 重要: キーマップレイアウトを調整してキーを並べ替えてください。レイアウトがキーマップ内のキーの順序を決定します。
 </ftl>
