@@ -6,7 +6,7 @@
 // All Kconfig belongs in Kconfig.defconfig, not name.conf.
 // ─────────────────────────────────────────────────────────────
 
-import type { ControllerId, Keyboard, KeyboardPart } from "~/types";
+import type { ControllerId, Keyboard, KeyboardPart, PinId } from "~/types";
 import { Controllers } from "~/metadata/controllers";
 import { getDeviceMeta } from "~/metadata/device";
 import { centralToPeripheralSnippetName } from "./paths";
@@ -348,8 +348,8 @@ config BT_MAX_PAIRED
 endif
 
 if ${keyboard.parts
-  .map((p) => `SHIELD_${upper}_${p.name.toUpperCase()}`)
-  .join(" || ")}
+        .map((p) => `SHIELD_${upper}_${p.name.toUpperCase()}`)
+        .join(" || ")}
 
 config ZMK_SPLIT
     default y
@@ -392,6 +392,32 @@ config BT_MAX_PAIRED
 
 endif
 `;
+  }
+
+  // NFC pins (P0.09/P0.10) used as GPIO on nRF52840 — enable NFCT_PINS_AS_GPIOS
+  const NFC_PINS = new Set(["0, 9", "0, 10"]);
+  for (const part of keyboard.parts) {
+    if (part.controller === 'nice_nano_v2') continue; // specifically exclude nice_nano_v2
+    const controllerMeta = Controllers[part.controller];
+    if (!controllerMeta || controllerMeta.soc !== "nrf52840") continue;
+
+    const usesNfcPins = Object.keys(part.pins).some((pinId) => {
+      const pinMeta = controllerMeta.gpios[pinId as PinId];
+      return pinMeta?.pinctrlRef && NFC_PINS.has(pinMeta.pinctrlRef);
+    });
+
+    if (usesNfcPins) {
+      const shieldCondition = partCount > 1
+        ? `SHIELD_${upper}_${part.name.toUpperCase()}`
+        : `SHIELD_${upper}`;
+      content += `
+# ${shieldCondition} uses NFC pins (P0.09/P0.10) on nRF52840 as GPIO
+if ${shieldCondition}
+config NFCT_PINS_AS_GPIOS
+    default y
+endif
+`;
+    }
   }
 
   return content;
