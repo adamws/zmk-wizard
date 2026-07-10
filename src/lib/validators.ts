@@ -5,25 +5,7 @@ import { ZMK_MODULES, modulesConflict } from "~/metadata/modules";
 import { KeyboardSchema } from "~/types/keyboard";
 import type { BusName, PinId, PinUsage, PinUsageEncoder } from "~/types";
 import { resolvePinInventory } from "~/lib/pinInventory";
-
-// ───────────────────────────────────────────────────────────
-// Reserved/common shield names (from ZMK ecosystem)
-//
-// When a new shield name conflicts with an existing ZMK board
-// or common keyboard name, add it here.
-// ───────────────────────────────────────────────────────────
-
-const COMMON_SHIELD_NAMES: readonly string[] = [
-  "test", "zmk", "key", "macro", "macropad", "macro_pad", "keyboard",
-  "my_keyboard", "corneish_zen", "totem", "nice_view", "nice_view_adapter",
-  "a_dux", "adafruit_kb2040", "adafruit_qt_py_rp2040", "adv360pro",
-  "bdn9_rev2", "bfo9000", "boardsource3x4", "boardsource5x12",
-  "boardsource_blok", "corne", "cradio", "ergodash", "ferris_rev02",
-  "helix", "iris", "jorne", "kyria", "lily58", "microdox",
-  "nice_nano", "nice_nano_v2", "nibble", "planck_rev6",
-  "seeeduino_xiao", "seeeduino_xiao_ble", "seeeduino_xiao_rp2040",
-  "sofle", "sweep",
-];
+import { ReservedNames } from "./shieldNames";
 
 // ───────────────────────────────────────────────────────────
 // Enhanced Keyboard Schema with superRefine validation
@@ -39,8 +21,8 @@ export const ValidatedKeyboardSchema = KeyboardSchema.superRefine((data, ctx) =>
   if (data.shield !== data.shield.trim()) {
     ctx.addIssue({ code: "custom", message: "Shield name cannot start or end with spaces", path: ["shield"] });
   }
-  if (COMMON_SHIELD_NAMES.includes(data.shield)) {
-    ctx.addIssue({ code: "custom", message: "Shield name is reserved; please choose another", path: ["shield"] });
+  if (ReservedNames.includes(data.shield)) {
+    ctx.addIssue({ code: "custom", message: "Shield name is reserved, please use a different name", path: ["shield"] });
   }
 
   // ── 3. Module conflicts — data-driven from ZMK_MODULES metadata ──

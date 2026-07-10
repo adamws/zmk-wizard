@@ -30,6 +30,13 @@
                 <UInput class="w-full" v-model="formState.shield" pattern="[a-z][a-z0-9_]*" />
               </UFormField>
 
+              <i18n path="random-name" tag="div" class="text-sm text-toned">
+                <template #name>
+                  <UButton size="xs" variant="outline" color="neutral" @click="commitRandomName"
+                    :label="candidateRandomName" />
+                </template>
+              </i18n>
+
               <UFormField class="w-full" :label="$t('split-part')" name="parts">
                 <URadioGroup v-model="formState.parts" class="w-full [&_label]:cursor-pointer" size="sm"
                   indicator="hidden" orientation="horizontal" variant="table" :items="partsItems"
@@ -62,9 +69,10 @@
 import type { FormSubmitEvent } from '@nuxt/ui';
 import { z } from 'astro/zod';
 import { useFluent } from 'fluent-vue';
-import { computed, reactive, useTemplateRef, watch } from 'vue';
+import { computed, reactive, ref, useTemplateRef, watch } from 'vue';
 
 import { useKeyboardStore, useNavigationStore } from '~/components/stores.ts';
+import { randomShieldName, ReservedNames } from '~/lib/shieldNames';
 import { KeyboardNameSchema, KeyboardPartSchema, ShieldNameSchema, type KeyboardPart } from '~/types';
 import { locales } from '../locales';
 
@@ -85,7 +93,9 @@ const nav = useNavigationStore();
 
 const formSchema = z.object({
   name: KeyboardNameSchema,
-  shield: ShieldNameSchema,
+  shield: ShieldNameSchema.refine((shield) => !ReservedNames.includes(shield), {
+    message: 'Shield name is reserved, please use a different name',
+  }),
   parts: z.number().min(1).max(5),
 })
 
@@ -134,8 +144,20 @@ watch(
     if (!formState.shield || formState.shield === oldShieldFromName) {
       formState.shield = nameToShield(newName)
     }
+
+    form?.value?.validate?.({ silent: true })
   },
 )
+
+const candidateRandomName = ref<string>(randomShieldName())
+
+function commitRandomName() {
+  formState.name = candidateRandomName.value
+  formState.shield = nameToShield(candidateRandomName.value)
+  candidateRandomName.value = randomShieldName()
+
+  form?.value?.validate?.({ silent: true })
+}
 
 const defaultPartNames = ['left', 'right', 'third', 'fourth', 'fifth']
 const defaultUnibodyPartName = 'unibody'
@@ -183,6 +205,7 @@ display-name = Display Name
 display-name-help = Shows up on your computer and phone. Max 16 bytes.
 shield-name = Shield Name
 shield-name-help = For firmware and file names. Use lowercase letters, numbers, and underscores.
+random-name = Can't think of a name? How about {$name}?
 split-part = Split Keyboard Parts
 parts-radio-label = {$count ->
   [1] Unibody
@@ -197,6 +220,7 @@ display-name = 显示名字
 display-name-help = 显示在电脑和手机上的名字。最长 16 字节。
 shield-name = Shield 名
 shield-name-help = 用于固件和文件名。使用小写字母、数字和下划线。
+random-name = 想不出名字？{$name}如何？
 split-part = 分体键盘构成
 parts-radio-label = {$count ->
   [1] 一体式
@@ -211,6 +235,7 @@ display-name = 表示名
 display-name-help = パソコンやスマートフォンに表示される名前です。最大16バイト。
 shield-name = シールド名
 shield-name-help = ファームウェアやファイル名に使われる名前です。小文字のアルファベット、数字、アンダースコアを使用してください。
+random-name = 名前が思いつかない？{$name}はどう？
 split-part = 分割キーボードの構成
 parts-radio-label = {$count ->
   [1] 一体型
